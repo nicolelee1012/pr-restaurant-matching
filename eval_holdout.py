@@ -18,7 +18,7 @@ from pathlib import Path
 
 from decision import HIGH_CONFIDENCE, MatchResult, decide, decide_from_llm
 from llm_matcher import llm_match_batch
-from models import RestaurantRow
+from models import RestaurantRow, ScoredCandidate
 from pr_registry import process_batch
 from scorer import rank_candidates
 
@@ -47,7 +47,7 @@ async def main() -> None:
     results = await process_batch(rows, fetch_details=True)
 
     tp = fp_wrong = fp_spurious = tn = 0
-    llm_inputs: list[tuple[dict, list]] = []
+    llm_inputs: list[tuple[RestaurantRow, list[ScoredCandidate]]] = []
     llm_meta: list[tuple[bool, str | None, str]] = []  # (is_labeled, true_legal, name)
     issues: list[str] = []
 

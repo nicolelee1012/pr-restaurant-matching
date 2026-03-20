@@ -74,7 +74,7 @@ def decide_from_llm(
     """Build MatchResult from a typed LLMMatchResponse."""
     name = restaurant_row.name
 
-    if llm_result.match_index is None or llm_result.confidence not in ("high",):
+    if llm_result.match_index is None or llm_result.confidence != "high":
         return MatchResult(
             restaurant_name=name,
             status=NO_MATCH,
@@ -191,12 +191,12 @@ def decide(
         base.reason = "; ".join(reasons) if reasons else "borderline"
         return base
 
-    reasons2: list[str] = []
+    below_threshold_reasons: list[str] = []
     if top.final_score < T_SCORE_REVIEW:
-        reasons2.append(f"score {top.final_score:.1f} < {T_SCORE_REVIEW}")
+        below_threshold_reasons.append(f"score {top.final_score:.1f} < {T_SCORE_REVIEW}")
     if margin < T_MARGIN_REVIEW:
-        reasons2.append(f"margin {margin:.1f} < {T_MARGIN_REVIEW}")
-    base.reason = "; ".join(reasons2) if reasons2 else "below all thresholds"
+        below_threshold_reasons.append(f"margin {margin:.1f} < {T_MARGIN_REVIEW}")
+    base.reason = "; ".join(below_threshold_reasons) if below_threshold_reasons else "below all thresholds"
     base.legal_name = ""
     base.pr_link = ""
     return base

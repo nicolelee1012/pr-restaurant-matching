@@ -13,9 +13,10 @@ Environment variables required:
     OPENAI_API_KEY    — OpenAI API key for LLM fallback
 """
 
-from run_full_pipeline import _parse_args, main
 import asyncio
 import logging
+
+from run_full_pipeline import _parse_args, main
 
 if __name__ == "__main__":
     args = _parse_args()

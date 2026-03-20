@@ -156,7 +156,7 @@ def _normalize_zip(z: str) -> str:
 
 def score_address(restaurant_row: RestaurantRow, entity_detail: RegistryEntityDetail | None) -> AddrScores:
     if not entity_detail:
-        return AddrScores(0, 0, 0, 0)
+        return AddrScores(city_match=0, zip_match=0, street_score=0, combined=0)
 
     r_city = clean_text(restaurant_row.city)
     r_zip = _normalize_zip(restaurant_row.postal_code)
@@ -240,7 +240,7 @@ NON_RESTAURANT_PURPOSE_KEYWORDS = {
 
 def score_auxiliary(entity_detail: RegistryEntityDetail | None) -> AuxScores:
     if not entity_detail:
-        return AuxScores(0, 0, False, 0)
+        return AuxScores(status_score=0, purpose_score=0, is_active=False, combined=0)
 
     # Status and purpose field names centralised in RegistryEntityDetail
     status = entity_detail.status
