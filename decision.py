@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence  # Mapping still used for llm_result
 
-from models import CandidatePreview, ScoredCandidate
+from models import CandidatePreview, RestaurantRow, ScoredCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,12 @@ def _build_pr_link(registration_index: str) -> str:
 
 
 def decide_from_llm(
-    restaurant_row: Mapping[str, Any],
+    restaurant_row: RestaurantRow,
     ranked_candidates: Sequence[ScoredCandidate],
     llm_result: Mapping[str, Any],
 ) -> MatchResult:
     """Build MatchResult from an LLM match decision."""
-    name = str(restaurant_row.get("Name") or "")
+    name = restaurant_row.name
     idx_any = llm_result.get("match_index")
     confidence = llm_result.get("confidence")
     reason = str(llm_result.get("reason") or "")
@@ -114,7 +114,7 @@ def decide_from_llm(
 
 
 def decide(
-    restaurant_row: Mapping[str, Any],
+    restaurant_row: RestaurantRow,
     ranked_candidates: Sequence[ScoredCandidate],
 ) -> MatchResult:
     """
@@ -122,7 +122,7 @@ def decide(
 
     ranked_candidates: output of scorer.rank_candidates() — sorted desc by final_score.
     """
-    name = str(restaurant_row.get("Name") or "")
+    name = restaurant_row.name
 
     if not ranked_candidates:
         return MatchResult(

@@ -32,6 +32,7 @@ from decision import (
     decide_from_llm,
 )
 from llm_matcher import llm_match_batch
+from models import RestaurantRow
 from pr_registry import load_restaurants, process_batch
 from scorer import rank_candidates
 
@@ -66,8 +67,9 @@ EXTRA_COLS = [
 # ---------------------------------------------------------------------------
 # Row builder
 # ---------------------------------------------------------------------------
-def build_output_row(original_row: dict[str, Any], d: MatchResult) -> dict[str, Any]:
-    row = dict(original_row)
+def build_output_row(original_row: RestaurantRow, d: MatchResult) -> dict[str, Any]:
+    # Start from the full original CSV row (preserves every column we didn't touch)
+    row = original_row.to_csv_row()
     row["Legal Name"] = d.legal_name or ""
     row["Puerto Rico Link"] = d.pr_link or ""
     row["match_status"] = d.status
@@ -103,8 +105,8 @@ async def main(
     original_cols = list(all_rows[0].keys())
     all_cols = original_cols + [c for c in EXTRA_COLS if c not in original_cols]
 
-    labeled_rows = [r for r in all_rows if r.get("Legal Name", "").strip()]
-    unlabeled_rows = [r for r in all_rows if not r.get("Legal Name", "").strip()]
+    labeled_rows = [r for r in all_rows if r.legal_name]
+    unlabeled_rows = [r for r in all_rows if not r.legal_name]
 
     logger.info("Total rows:                   %s", len(all_rows))
     logger.info("Already labeled (kept as-is): %s", len(labeled_rows))
@@ -138,7 +140,7 @@ async def main(
 
         # Pass pre-labeled rows straight through to the full output.
         for r in labeled_rows:
-            out: dict[str, Any] = dict(r)
+            out: dict[str, Any] = r.to_csv_row()
             out.update({
                 "match_status": "pre-labeled",
                 "match_confidence": "",

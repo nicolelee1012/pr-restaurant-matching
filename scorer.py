@@ -10,11 +10,11 @@ Scores PR registry candidates against restaurant data using:
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping  # Mapping still used for candidate/entity_detail dicts
 
 from rapidfuzz import fuzz
 
-from models import AddrScores, AuxScores, NameScores, ScoredCandidate
+from models import AddrScores, AuxScores, NameScores, RestaurantRow, ScoredCandidate
 from utils import clean_text, strip_accents  # noqa: F401  (re-exported for callers)
 
 # ---------------------------------------------------------------------------
@@ -205,13 +205,13 @@ def _normalize_zip(z: str) -> str:
     return z_str[:5]
 
 
-def score_address(restaurant_row: Mapping[str, Any], entity_detail: Mapping[str, Any] | None) -> AddrScores:
+def score_address(restaurant_row: RestaurantRow, entity_detail: Mapping[str, Any] | None) -> AddrScores:
     if not entity_detail:
         return AddrScores(0, 0, 0, 0)
 
-    r_city = clean_text(str(restaurant_row.get("City") or ""))
-    r_zip = _normalize_zip(str(restaurant_row.get("Postal code") or ""))
-    r_street = clean_text(str(restaurant_row.get("Street") or ""))
+    r_city = clean_text(restaurant_row.city)
+    r_zip = _normalize_zip(restaurant_row.postal_code)
+    r_street = clean_text(restaurant_row.street or restaurant_row.full_address)
 
     corp_addr: dict[str, Any] = entity_detail.get("corpStreetAddress") or {}
     if not corp_addr or str(corp_addr.get("city") or "").lower() == "unknown":
@@ -345,7 +345,7 @@ def score_auxiliary(entity_detail: Mapping[str, Any] | None) -> AuxScores:
 
 
 def score_candidate(
-    restaurant_row: Mapping[str, Any],
+    restaurant_row: RestaurantRow,
     candidate: Mapping[str, Any],
 ) -> ScoredCandidate:
     search_rec = candidate["search_record"]
@@ -358,7 +358,7 @@ def score_candidate(
     else:
         detail = None
 
-    restaurant_name = str(restaurant_row.get("Name") or "")
+    restaurant_name = restaurant_row.name
     corp_name = str(search_rec.get("corpName") or "")
 
     name_scores = score_name(restaurant_name, corp_name)
@@ -395,7 +395,7 @@ def score_candidate(
 
 
 def rank_candidates(
-    restaurant_row: Mapping[str, Any],
+    restaurant_row: RestaurantRow,
     candidates: list[Mapping[str, Any]],
 ) -> list[ScoredCandidate]:
     scored = [score_candidate(restaurant_row, c) for c in candidates]

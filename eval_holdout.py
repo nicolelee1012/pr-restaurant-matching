@@ -18,7 +18,8 @@ from pathlib import Path
 
 from decision import HIGH_CONFIDENCE, NEEDS_REVIEW, MatchResult, decide, decide_from_llm
 from llm_matcher import llm_match_batch
-from pr_registry import process_batch
+from models import RestaurantRow
+from pr_registry import load_restaurants, process_batch
 from scorer import rank_candidates
 
 logger = logging.getLogger(__name__)
@@ -34,10 +35,10 @@ def _normalize(s: str) -> str:
 
 async def main() -> None:
     with open(HOLDOUT_PATH, encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+        rows = [RestaurantRow.from_csv_row(r) for r in csv.DictReader(f)]
 
-    labeled = [r for r in rows if r.get("Legal Name", "").strip()]
-    unlabeled = [r for r in rows if not r.get("Legal Name", "").strip()]
+    labeled = [r for r in rows if r.legal_name]
+    unlabeled = [r for r in rows if not r.legal_name]
     logger.info(
         "Holdout set: %s total — %s labeled, %s unlabeled (confirmed no match)",
         len(rows), len(labeled), len(unlabeled),
@@ -59,9 +60,9 @@ async def main() -> None:
         d = decide(row, ranked)
         det_decisions.append((row, ranked, d))
 
-        is_labeled = bool(row.get("Legal Name", "").strip())
-        true_legal = _normalize(row.get("Legal Name", "")) if is_labeled else None
-        name = row["Name"]
+        is_labeled = bool(row.legal_name)
+        true_legal = _normalize(row.legal_name) if is_labeled else None
+        name = row.name
 
         if d.status == HIGH_CONFIDENCE:
             if is_labeled:
@@ -119,7 +120,7 @@ async def main() -> None:
                 if not is_labeled:
                     tn += 1
                 else:
-                    issues.append(f"MISS: {name:<47} expected={true_legal}")
+                    issues.append(f"MISS: {name:<47} expected={true_legal or 'N/A'}")
 
     # ── Summary ──────────────────────────────────────────────────────────────
     total_fp = fp_wrong + fp_spurious

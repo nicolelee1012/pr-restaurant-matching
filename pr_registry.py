@@ -35,6 +35,7 @@ import certifi
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCPConnector
 
 from exceptions import ConfigurationError
+from models import RestaurantRow
 from utils import strip_accents
 
 logger = logging.getLogger(__name__)
@@ -407,22 +408,23 @@ async def find_candidates(
 # ---------------------------------------------------------------------------
 # Load CSV
 # ---------------------------------------------------------------------------
-def load_restaurants(csv_path: str | None = None) -> list[dict[str, Any]]:
-    """Load restaurant data from CSV."""
+def load_restaurants(csv_path: str | None = None) -> list[RestaurantRow]:
+    """
+    Load restaurant data from CSV and return typed ``RestaurantRow`` objects.
+
+    Column name mapping lives in ``RestaurantRow.COLUMN_MAP`` — update there
+    if the upstream spreadsheet schema ever changes.
+    """
     path = csv_path or str(CSV_PATH)
-    rows = []
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
-    return rows
+    with open(path, encoding="utf-8-sig") as f:
+        return [RestaurantRow.from_csv_row(row) for row in csv.DictReader(f)]
 
 
 # ---------------------------------------------------------------------------
 # Main: search for all restaurants and fetch entity details
 # ---------------------------------------------------------------------------
 async def process_batch(
-    restaurants: list[dict[str, Any]],
+    restaurants: list[RestaurantRow],
     start: int = 0,
     limit: int | None = None,
     fetch_details: bool = True,
@@ -460,8 +462,8 @@ async def process_batch(
         auto_decompress=False,
     ) as session:
 
-        async def process_one(i: int, row: dict[str, Any]) -> dict[str, Any]:
-            name = (row.get("Name") or "").strip()
+        async def process_one(i: int, row: RestaurantRow) -> dict[str, Any]:
+            name = row.name
             if not name:
                 return {"restaurant": row, "candidates": []}
 
