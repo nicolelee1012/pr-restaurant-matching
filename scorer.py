@@ -14,7 +14,7 @@ from typing import Any, Mapping  # Mapping still used for candidate/entity_detai
 
 from rapidfuzz import fuzz
 
-from models import AddrScores, AuxScores, NameScores, RestaurantRow, ScoredCandidate
+from models import AddrScores, AuxScores, Candidate, NameScores, RestaurantRow, ScoredCandidate
 from utils import clean_text, strip_accents  # noqa: F401  (re-exported for callers)
 
 # ---------------------------------------------------------------------------
@@ -346,58 +346,43 @@ def score_auxiliary(entity_detail: Mapping[str, Any] | None) -> AuxScores:
 
 def score_candidate(
     restaurant_row: RestaurantRow,
-    candidate: Mapping[str, Any],
+    candidate: Candidate,
 ) -> ScoredCandidate:
-    search_rec = candidate["search_record"]
-    raw_detail = candidate.get("detail")
-    detail: dict[str, Any] | None
-    if raw_detail is None:
-        detail = None
-    elif isinstance(raw_detail, dict):
-        detail = raw_detail
-    else:
-        detail = None
-
-    restaurant_name = restaurant_row.name
-    corp_name = str(search_rec.get("corpName") or "")
-
-    name_scores = score_name(restaurant_name, corp_name)
-    addr_scores = score_address(restaurant_row, detail)
-    aux_scores = score_auxiliary(detail)
+    """Score a single typed Candidate against a RestaurantRow."""
+    name_scores = score_name(restaurant_row.name, candidate.corp_name)
+    addr_scores = score_address(restaurant_row, candidate.detail)
+    aux_scores = score_auxiliary(candidate.detail)
 
     name_s = name_scores.combined
     addr_s = addr_scores.combined
     aux_s = aux_scores.combined
-    is_active = aux_scores.is_active
-    purpose_s = aux_scores.purpose_score
 
     final_score = _W_NAME * name_s + _W_ADDR * addr_s + _W_AUX * aux_s
 
     if name_s >= _THRESH_BONUS_NAME:
         final_score += _BONUS_HIGH_NAME
-
-    if not is_active:
+    if not aux_scores.is_active:
         final_score *= _PENALTY_INACTIVE
-
-    if purpose_s <= _THRESH_NON_RESTAURANT:
+    if aux_scores.purpose_score <= _THRESH_NON_RESTAURANT:
         final_score *= _PENALTY_NON_RESTAURANT
 
     return ScoredCandidate(
-        corp_name=corp_name,
-        registration_index=str(search_rec.get("registrationIndex") or ""),
-        status=str(search_rec.get("statusEn") or ""),
+        corp_name=candidate.corp_name,
+        registration_index=candidate.registration_index,
+        status=candidate.entity_status,
         final_score=float(final_score),
         name_scores=name_scores,
         addr_scores=addr_scores,
         aux_scores=aux_scores,
-        detail=detail,
+        detail=candidate.detail,
     )
 
 
 def rank_candidates(
     restaurant_row: RestaurantRow,
-    candidates: list[Mapping[str, Any]],
+    candidates: list[Candidate],
 ) -> list[ScoredCandidate]:
+    """Score and sort all candidates for a restaurant, best first."""
     scored = [score_candidate(restaurant_row, c) for c in candidates]
     scored.sort(key=lambda x: -x.final_score)
     return scored

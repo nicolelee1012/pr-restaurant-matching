@@ -16,13 +16,12 @@ async def main():
 
     rows = []
     for res in results:
-        row = res["restaurant"]
-        name = row["Name"]
-        expected_legal = row["Legal Name"].strip().upper()
-        pr_link = row.get("Puerto Rico Link", "")
-        expected_idx = pr_link.split("?c=")[-1] if "?c=" in pr_link else ""
+        row = res.restaurant
+        name = row.name
+        expected_legal = row.legal_name.upper()
+        expected_idx = row.pr_link.split("?c=")[-1] if "?c=" in row.pr_link else ""
 
-        if not res["candidates"]:
+        if not res.candidates:
             rows.append({
                 "name": name, "expected": expected_legal,
                 "top_score": 0, "margin": 0, "addr_score": 0,
@@ -30,7 +29,7 @@ async def main():
             })
             continue
 
-        ranked = rank_candidates(row, res["candidates"])
+        ranked = rank_candidates(row, res.candidates)
         top = ranked[0]
         second = ranked[1].final_score if len(ranked) > 1 else 0
         margin = top.final_score - second

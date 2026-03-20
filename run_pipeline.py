@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from decision import HIGH_CONFIDENCE, NEEDS_REVIEW, NO_MATCH, MatchResult, decide, print_summary
+from models import BatchResult, RestaurantRow
 from pr_registry import load_restaurants, process_batch
 from scorer import rank_candidates
 
@@ -33,15 +34,13 @@ OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
-def run_scoring_and_decisions(results: list[dict]) -> list[tuple[dict, MatchResult]]:
+def run_scoring_and_decisions(results: list[BatchResult]) -> list[tuple[RestaurantRow, MatchResult]]:
     """Score candidates and apply decision logic for each restaurant."""
     decisions = []
     for res in results:
-        row = res["restaurant"]
-        candidates = res["candidates"]
-        ranked = rank_candidates(row, candidates) if candidates else []
-        d = decide(row, ranked)
-        decisions.append((row, d))
+        ranked = rank_candidates(res.restaurant, res.candidates) if res.candidates else []
+        d = decide(res.restaurant, ranked)
+        decisions.append((res.restaurant, d))
     return decisions
 
 
@@ -66,7 +65,7 @@ def write_output_csv(decisions: list[tuple[dict, MatchResult]], output_path: Pat
         writer.writeheader()
 
         for row, d in decisions:
-            out = dict(row)
+            out = row.to_csv_row()
 
             if d.status == HIGH_CONFIDENCE:
                 out["Legal Name"] = d.legal_name
@@ -106,17 +105,17 @@ def write_review_csv(decisions: list[tuple[dict, MatchResult]], output_path: Pat
 
         for row, d in review_rows:
             out = {
-                "Name": row.get("Name", ""),
-                "Full address": row.get("Full address", ""),
-                "City": row.get("City", ""),
-                "Postal code": row.get("Postal code", ""),
+                "Name": row.name,
+                "Full address": row.full_address,
+                "City": row.city,
+                "Postal code": row.postal_code,
                 "Match Status": d.status,
                 "Reason": d.reason,
             }
             for i, cand in enumerate(d.top_candidates[:3], 1):
-                out[f"Candidate {i} Name"] = cand["corp_name"]
-                out[f"Candidate {i} Score"] = cand["final_score"]
-                out[f"Candidate {i} Index"] = cand["registration_index"]
+                out[f"Candidate {i} Name"] = cand.corp_name
+                out[f"Candidate {i} Score"] = cand.final_score
+                out[f"Candidate {i} Index"] = cand.registration_index
 
             writer.writerow(out)
 

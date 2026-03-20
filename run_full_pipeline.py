@@ -79,11 +79,11 @@ def build_output_row(original_row: RestaurantRow, d: MatchResult) -> dict[str, A
     row["match_addr_score"] = d.addr_score
     row["match_reason"] = d.reason
     row["match_source"] = d.match_source
-    cands = d.top_candidates or []
-    row["top2_name"] = cands[1]["corp_name"] if len(cands) > 1 else ""
-    row["top2_score"] = cands[1]["final_score"] if len(cands) > 1 else ""
-    row["top3_name"] = cands[2]["corp_name"] if len(cands) > 2 else ""
-    row["top3_score"] = cands[2]["final_score"] if len(cands) > 2 else ""
+    cands = d.top_candidates
+    row["top2_name"] = cands[1].corp_name if len(cands) > 1 else ""
+    row["top2_score"] = cands[1].final_score if len(cands) > 1 else ""
+    row["top3_name"] = cands[2].corp_name if len(cands) > 2 else ""
+    row["top3_score"] = cands[2].final_score if len(cands) > 2 else ""
     return row
 
 
@@ -170,8 +170,8 @@ async def main(
             llm_needed: list[tuple[int, dict[str, Any], list]] = []
 
             for i, res in enumerate(results):
-                row = res["restaurant"]
-                ranked = rank_candidates(row, res["candidates"]) if res["candidates"] else []
+                row = res.restaurant
+                ranked = rank_candidates(row, res.candidates) if res.candidates else []
                 d = decide(row, ranked)
                 batch_decisions.append((row, ranked, d))
                 if d.status != HIGH_CONFIDENCE and ranked:

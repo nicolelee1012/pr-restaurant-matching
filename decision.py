@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Sequence  # Mapping still used for llm_result
 
-from models import CandidatePreview, RestaurantRow, ScoredCandidate
+from models import CandidatePreview, LLMMatchResponse, RestaurantRow, ScoredCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class MatchResult:
     addr_score: float = 0.0
     reason: str = ""
     match_source: str = "deterministic"
-    top_candidates: list[dict[str, Any]] = field(default_factory=list)
+    top_candidates: list[CandidatePreview] = field(default_factory=list)
 
 
 def _build_pr_link(registration_index: str) -> str:
@@ -69,30 +69,26 @@ def _build_pr_link(registration_index: str) -> str:
 def decide_from_llm(
     restaurant_row: RestaurantRow,
     ranked_candidates: Sequence[ScoredCandidate],
-    llm_result: Mapping[str, Any],
+    llm_result: LLMMatchResponse,
 ) -> MatchResult:
-    """Build MatchResult from an LLM match decision."""
+    """Build MatchResult from a typed LLMMatchResponse."""
     name = restaurant_row.name
-    idx_any = llm_result.get("match_index")
-    confidence = llm_result.get("confidence")
-    reason = str(llm_result.get("reason") or "")
-    source = str(llm_result.get("source") or "llm")
 
-    if idx_any is None or confidence not in ("high",):
+    if llm_result.match_index is None or llm_result.confidence not in ("high",):
         return MatchResult(
             restaurant_name=name,
             status=NO_MATCH,
-            reason=f"LLM: no match — {reason}",
-            match_source=source,
+            reason=f"LLM: no match — {llm_result.reason}",
+            match_source=llm_result.source,
         )
 
-    idx = int(idx_any)
+    idx = llm_result.match_index
     if idx < 0 or idx >= len(ranked_candidates):
         return MatchResult(
             restaurant_name=name,
             status=NO_MATCH,
             reason=f"LLM: invalid index {idx}",
-            match_source=source,
+            match_source=llm_result.source,
         )
 
     matched = ranked_candidates[idx]
@@ -107,8 +103,8 @@ def decide_from_llm(
         margin=0.0,
         name_score=round(matched.name_scores.combined, 1),
         addr_score=round(matched.addr_scores.combined, 1),
-        reason=f"LLM ({confidence} confidence): {reason}",
-        match_source=source,
+        reason=f"LLM ({llm_result.confidence} confidence): {llm_result.reason}",
+        match_source=llm_result.source,
         top_candidates=[],
     )
 
@@ -146,7 +142,7 @@ def decide(
             name_score=round(c.name_scores.combined, 1),
             addr_score=round(c.addr_scores.combined, 1),
             status=c.status,
-        ).to_dict()
+        )
         for c in ranked_candidates[:3]
     ]
 

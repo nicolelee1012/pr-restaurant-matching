@@ -84,6 +84,82 @@ class RestaurantRow:
 
 
 @dataclass
+class Candidate:
+    """
+    One registry search result paired with its fetched detail payload.
+
+    Registry API field names (``"corpName"``, ``"registrationIndex"``, …) are
+    accessed only through the typed properties below.  If the upstream API ever
+    renames a field, update the property — nothing else needs to change.
+    """
+
+    search_record: dict[str, Any]   # raw /search API record
+    detail: dict[str, Any] | None = None  # raw /info API payload, if fetched
+
+    # ── Typed accessors for registry search-record fields ───────────────────
+    @property
+    def corp_name(self) -> str:
+        return str(self.search_record.get("corpName") or "")
+
+    @property
+    def registration_index(self) -> str:
+        return str(self.search_record.get("registrationIndex") or "")
+
+    @property
+    def entity_status(self) -> str:
+        return str(self.search_record.get("statusEn") or "")
+
+    @property
+    def business_entity_id(self) -> str:
+        return str(self.search_record.get("businessEntityId") or "")
+
+
+@dataclass
+class BatchResult:
+    """
+    Output of ``process_batch()`` for a single restaurant.
+
+    Replaces the raw ``{"restaurant": …, "candidates": […]}`` dict so
+    callers use typed attribute access instead of string key lookups.
+    """
+
+    restaurant: RestaurantRow
+    candidates: list[Candidate]
+
+
+@dataclass
+class LLMMatchResponse:
+    """
+    Parsed response from the GPT-4o-mini fallback matcher.
+
+    All LLM JSON field names (``"match_index"``, ``"confidence"``, …) are
+    extracted once in ``from_dict()`` — the rest of the codebase sees only
+    typed attributes.
+    """
+
+    match_index: int | None       # index into the ranked candidates list
+    confidence: str | None        # "high" or None
+    reason: str
+    source: str = "llm"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any], source: str = "llm") -> LLMMatchResponse:
+        """Parse a raw LLM JSON response dict."""
+        raw_idx = d.get("match_index")
+        return cls(
+            match_index=int(raw_idx) if raw_idx is not None else None,
+            confidence=d.get("confidence"),
+            reason=str(d.get("reason") or ""),
+            source=source,
+        )
+
+    @classmethod
+    def no_match(cls, reason: str = "", source: str = "llm") -> LLMMatchResponse:
+        """Convenience constructor for a no-match result."""
+        return cls(match_index=None, confidence=None, reason=reason, source=source)
+
+
+@dataclass
 class NameScores:
     token_sort: float
     token_set: float

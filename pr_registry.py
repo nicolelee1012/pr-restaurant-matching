@@ -35,7 +35,7 @@ import certifi
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCPConnector
 
 from exceptions import ConfigurationError
-from models import RestaurantRow
+from models import BatchResult, Candidate, RestaurantRow
 from utils import strip_accents
 
 logger = logging.getLogger(__name__)
@@ -428,7 +428,7 @@ async def process_batch(
     start: int = 0,
     limit: int | None = None,
     fetch_details: bool = True,
-) -> list[dict[str, Any]]:
+) -> list[BatchResult]:
     """
     For each restaurant, search the PR registry and collect candidates.
     Optionally fetch detailed entity info for each candidate.
@@ -462,10 +462,10 @@ async def process_batch(
         auto_decompress=False,
     ) as session:
 
-        async def process_one(i: int, row: RestaurantRow) -> dict[str, Any]:
+        async def process_one(i: int, row: RestaurantRow) -> BatchResult:
             name = row.name
             if not name:
-                return {"restaurant": row, "candidates": []}
+                return BatchResult(restaurant=row, candidates=[])
 
             logger.info("[%s/%s] Searching: %s", start + i + 1, start + len(subset), name)
 
@@ -477,28 +477,26 @@ async def process_batch(
             # between positions 20–30 still receive address/status data for
             # scoring and LLM prompts.
             top_recs = candidates_raw[:30]
-            candidates: list[dict[str, Any]] = []
+            candidates: list[Candidate] = []
 
             if fetch_details:
-                async def fetch_detail(rec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+                async def fetch_detail(rec: dict[str, Any]) -> Candidate:
                     reg_idx = rec.get("registrationIndex")
                     if reg_idx:
                         detail = await get_entity_info(session, str(reg_idx), sem, api_key)
-                        return rec, detail
-                    return rec, None
+                        return Candidate(search_record=rec, detail=detail)
+                    return Candidate(search_record=rec, detail=None)
 
-                detail_results = await asyncio.gather(*[fetch_detail(rec) for rec in top_recs])
-                for rec, detail in detail_results:
-                    candidates.append({"search_record": rec, "detail": detail})
+                candidates = list(await asyncio.gather(*[fetch_detail(rec) for rec in top_recs]))
             else:
-                candidates = [{"search_record": rec, "detail": None} for rec in top_recs]
+                candidates = [Candidate(search_record=rec) for rec in top_recs]
 
-            return {"restaurant": row, "candidates": candidates}
+            return BatchResult(restaurant=row, candidates=candidates)
 
         tasks = [process_one(i, row) for i, row in enumerate(subset)]
-        results = await asyncio.gather(*tasks)
+        results: list[BatchResult] = list(await asyncio.gather(*tasks))
 
-    return list(results)
+    return results
 
 
 # ---------------------------------------------------------------------------

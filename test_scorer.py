@@ -21,18 +21,17 @@ async def main():
     failures: list = []
 
     for res in results:
-        row = res["restaurant"]
-        name = row["Name"]
-        expected_legal = row["Legal Name"].strip().upper()
-        pr_link = row.get("Puerto Rico Link", "")
-        expected_idx = pr_link.split("?c=")[-1] if "?c=" in pr_link else ""
+        row = res.restaurant
+        name = row.name
+        expected_legal = row.legal_name.upper()
+        expected_idx = row.pr_link.split("?c=")[-1] if "?c=" in row.pr_link else ""
 
-        if not res["candidates"]:
+        if not res.candidates:
             failures.append((name, expected_legal, "NO CANDIDATES", 0, []))
             continue
 
         total_with_candidates += 1
-        ranked = rank_candidates(row, res["candidates"])
+        ranked = rank_candidates(row, res.candidates)
 
         top = ranked[0]
         is_top1 = (

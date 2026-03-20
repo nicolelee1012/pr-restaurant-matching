@@ -55,8 +55,8 @@ async def main() -> None:
     det_decisions: list[tuple[dict, list, MatchResult]] = []
 
     for res in results:
-        row = res["restaurant"]
-        ranked = rank_candidates(row, res["candidates"]) if res["candidates"] else []
+        row = res.restaurant
+        ranked = rank_candidates(row, res.candidates) if res.candidates else []
         d = decide(row, ranked)
         det_decisions.append((row, ranked, d))
 

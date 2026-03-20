@@ -19,7 +19,7 @@ from typing import Any, Mapping, Sequence
 from openai import AsyncOpenAI
 
 from exceptions import ConfigurationError
-from models import ScoredCandidate
+from models import LLMMatchResponse, RestaurantRow, ScoredCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _LLM_SEMAPHORE
 
 
-def _cache_key(restaurant_name: str, candidates: Sequence[ScoredCandidate]) -> str:
+def _cache_key(restaurant_name: str, candidates: Sequence[ScoredCandidate]) -> str:  # noqa: E501
     payload = json.dumps(
         {
             "name": restaurant_name,
@@ -85,11 +85,11 @@ def _cache_set(key: str, value: Mapping[str, Any]) -> None:
         logger.warning("Failed to write LLM cache %s: %s", path, exc)
 
 
-def _build_prompt(restaurant: Mapping[str, Any], candidates: Sequence[ScoredCandidate]) -> str:
-    name = restaurant.get("Name", "")
-    street = restaurant.get("Street", "") or restaurant.get("Full address", "")
-    city = restaurant.get("City", "")
-    postal = restaurant.get("Postal code", "")
+def _build_prompt(restaurant: RestaurantRow, candidates: Sequence[ScoredCandidate]) -> str:
+    name = restaurant.name
+    street = restaurant.street or restaurant.full_address
+    city = restaurant.city
+    postal = restaurant.postal_code
     address_str = ", ".join(filter(None, [street, city, postal, "Puerto Rico"]))
 
     lines = [
@@ -153,19 +153,17 @@ def _build_prompt(restaurant: Mapping[str, Any], candidates: Sequence[ScoredCand
 
 
 async def llm_match(
-    restaurant: Mapping[str, Any],
+    restaurant: RestaurantRow,
     candidates: Sequence[ScoredCandidate],
     client: AsyncOpenAI,
-) -> dict[str, Any]:
+) -> LLMMatchResponse:
     if not candidates:
-        return {"match_index": None, "confidence": None, "reason": "no candidates", "source": "llm"}
+        return LLMMatchResponse.no_match("no candidates")
 
-    cache_key = _cache_key(str(restaurant.get("Name", "")), candidates)
+    cache_key = _cache_key(restaurant.name, candidates)
     cached = _cache_get(cache_key)
     if cached:
-        out = dict(cached)
-        out["source"] = "llm_cache"
-        return out
+        return LLMMatchResponse.from_dict(cached, source="llm_cache")
 
     prompt = _build_prompt(restaurant, candidates)
 
@@ -188,54 +186,39 @@ async def llm_match(
             raw = (response.choices[0].message.content or "").strip()
 
             # Robustly extract the JSON object regardless of markdown wrappers.
-            # Find the outermost { ... } and parse only that.
             json_start = raw.find("{")
             json_end = raw.rfind("}")
             if json_start != -1 and json_end > json_start:
                 raw = raw[json_start : json_end + 1]
-            result = json.loads(raw)
+            result: dict[str, Any] = json.loads(raw)
 
+            # Validate index before caching
             match_index = result.get("match_index")
-            confidence = result.get("confidence")
-            reason = result.get("reason", "")
-
             if match_index is not None and (
                 not isinstance(match_index, int)
                 or match_index < 0
                 or match_index >= len(candidates)
             ):
-                match_index = None
-                confidence = None
-                reason = f"invalid index from LLM: {result}"
+                result["match_index"] = None
+                result["confidence"] = None
+                result["reason"] = f"invalid index from LLM: {result}"
 
-            out: dict[str, Any] = {
-                "match_index": match_index,
-                "confidence": confidence,
-                "reason": reason,
-                "source": "llm",
-            }
-            _cache_set(cache_key, out)
-            return out
+            _cache_set(cache_key, result)
+            return LLMMatchResponse.from_dict(result, source="llm")
 
         except Exception as e:
             logger.exception("LLM match failed")
-            return {
-                "match_index": None,
-                "confidence": None,
-                "reason": f"LLM error: {e}",
-                "source": "llm_error",
-            }
+            return LLMMatchResponse.no_match(f"LLM error: {e}", source="llm_error")
 
 
 async def llm_match_batch(
-    rows_with_candidates: list[tuple[Mapping[str, Any], list[ScoredCandidate]]],
-) -> list[dict[str, Any]]:
+    rows_with_candidates: list[tuple[RestaurantRow, list[ScoredCandidate]]],
+) -> list[LLMMatchResponse]:
     """
     Run LLM matching concurrently for a list of (restaurant, candidates) pairs.
 
     Creates one shared AsyncOpenAI client for the batch and closes it when done.
-    Returns one result dict per input row — same order as input.
-    Each dict has keys: match_index, confidence, reason, source.
+    Returns one ``LLMMatchResponse`` per input row in the same order.
     """
     client = AsyncOpenAI(api_key=get_openai_api_key())
     try:
