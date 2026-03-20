@@ -36,7 +36,7 @@ from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCP
 
 from exceptions import ConfigurationError
 from models import BatchResult, Candidate, RegistryEntityDetail, RestaurantRow
-from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, strip_accents, strip_noise_phrases
+from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, strip_accents, strip_corp_suffixes, strip_noise_phrases, strip_noise_words
 
 logger = logging.getLogger(__name__)
 
@@ -321,12 +321,18 @@ async def get_entity_info(
 # ---------------------------------------------------------------------------
 def _name_token_overlap(restaurant_name: str, corp_name: str) -> float:
     """Quick token overlap score between restaurant name and corp name."""
-    r_tokens = set(normalize_name(restaurant_name).split())
+    # Use word-boundary noise removal so "foods" is NOT corrupted into " s"
+    # by the substring-based strip_noise_phrases (which replaces "food" → " ").
+    # strip_noise_words keeps "foods" intact because the token "foods" ≠ "food".
+    r_clean = strip_corp_suffixes(strip_noise_words(restaurant_name))
+    r_tokens = set(r_clean.split()) if r_clean else set(strip_accents(restaurant_name.lower()).split())
+
     c_tokens = set(strip_accents(corp_name.lower()).split())
-    # Remove corporate suffixes and common stopwords (single source of truth: utils.py)
-    stopwords = {"de", "del"} | TOO_COMMON_WORDS
-    c_tokens -= CORP_SUFFIXES | stopwords
-    r_tokens -= stopwords
+    # Only remove grammatical articles from tokens — NOT directional words like
+    # "west"/"north"/"south" which distinguish brands ("West Marine" ≠ "South Marine").
+    _ARTICLES: frozenset[str] = frozenset({"the", "el", "la", "los", "las", "de", "del"})
+    c_tokens -= CORP_SUFFIXES | _ARTICLES
+    r_tokens -= _ARTICLES
     if not r_tokens or not c_tokens:
         return 0.0
     # Exact overlap

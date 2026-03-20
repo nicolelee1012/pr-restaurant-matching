@@ -10,19 +10,10 @@ Scores PR registry candidates against restaurant data using:
 from __future__ import annotations
 
 import re
-from typing import Any
-
 from rapidfuzz import fuzz
 
 from models import AddrScores, AuxScores, Candidate, NameScores, RegistryEntityDetail, RestaurantRow, ScoredCandidate
-from utils import (  # noqa: F401  (re-exported for callers)
-    CORP_SUFFIXES,
-    clean_text,
-    strip_accents,
-    strip_corp_suffixes,
-    strip_noise_phrases,
-    strip_noise_words,
-)
+from utils import clean_text, strip_corp_suffixes, strip_noise_words
 
 # ---------------------------------------------------------------------------
 # Score weights — calibrated on first 116 labeled rows (37 matches + 79 no-match)
@@ -57,10 +48,6 @@ _FUZZY_RATIO_THRESHOLD: float = 85.0   # fuzz.ratio score to count as a token ma
 # ---------------------------------------------------------------------------
 # Name scoring
 # ---------------------------------------------------------------------------
-# RESTAURANT_NOISE, CORP_SUFFIXES, and the strip functions all live in utils.py
-# (the single source of truth). They are imported above and re-exported so
-# external callers that import them from scorer continue to work.
-
 
 def _strip_location_suffix(name: str) -> str:
     return re.split(r"\s*[-–—]\s*", name)[0].strip()
