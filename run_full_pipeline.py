@@ -32,8 +32,8 @@ from decision import (
     decide_from_llm,
 )
 from llm_matcher import llm_match_batch
-from models import RestaurantRow
-from pr_registry import load_restaurants, process_batch
+from models import RestaurantRow, ScoredCandidate
+from pr_registry import process_batch
 from scorer import rank_candidates
 
 logger = logging.getLogger(__name__)
@@ -166,8 +166,8 @@ async def main(
             results = await process_batch(batch, fetch_details=True)
 
             # ── Step 1: deterministic pass ──────────────────────────────────
-            batch_decisions: list[tuple[dict[str, Any], list, MatchResult]] = []
-            llm_needed: list[tuple[int, dict[str, Any], list]] = []
+            batch_decisions: list[tuple[RestaurantRow, list[ScoredCandidate], MatchResult]] = []
+            llm_needed: list[tuple[int, RestaurantRow, list[ScoredCandidate]]] = []
 
             for i, res in enumerate(results):
                 row = res.restaurant

@@ -306,12 +306,3 @@ class CandidatePreview:
     addr_score: float
     status: str
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "corp_name": self.corp_name,
-            "registration_index": self.registration_index,
-            "final_score": self.final_score,
-            "name_score": self.name_score,
-            "addr_score": self.addr_score,
-            "status": self.status,
-        }

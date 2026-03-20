@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Sequence  # Mapping still used for llm_result
+from typing import Literal, Sequence
 
 from models import CandidatePreview, LLMMatchResponse, RestaurantRow, ScoredCandidate
 
@@ -202,48 +202,3 @@ def decide(
     return base
 
 
-def classify_batch(
-    results: list[Any],
-    ranked_map: dict[str, list[ScoredCandidate]] | None = None,
-) -> list[MatchResult]:
-    """
-    Apply ``decide()`` to a list of ``BatchResult`` objects.
-
-    ``ranked_map`` optionally supplies pre-scored candidates keyed by
-    restaurant name (used when scoring has already been run outside this
-    function).  When absent, each restaurant is decided with no candidates.
-
-    Returns one ``MatchResult`` per input element, in the same order.
-    """
-    from models import BatchResult  # local import avoids circular risk
-
-    decisions: list[MatchResult] = []
-    for res in results:
-        if isinstance(res, BatchResult):
-            row = res.restaurant
-        else:
-            # Fallback: legacy dict-based caller (deprecated)
-            row = res.get("restaurant")
-        ranked = (ranked_map or {}).get(row.name, [])
-        decisions.append(decide(row, ranked))
-    return decisions
-
-
-def print_summary(decisions: Sequence[MatchResult]) -> None:
-    """Log a concise summary of match/review/no_match counts to the root logger."""
-    total = len(decisions)
-    if total == 0:
-        logger.info("No decisions to summarize.")
-        return
-    matched = sum(1 for d in decisions if d.status == HIGH_CONFIDENCE)
-    review = sum(1 for d in decisions if d.status == NEEDS_REVIEW)
-    no_match = sum(1 for d in decisions if d.status == NO_MATCH)
-
-    logger.info("=" * 60)
-    logger.info("DECISION SUMMARY")
-    logger.info("=" * 60)
-    logger.info("Total rows:      %s", total)
-    logger.info("High confidence: %4d (%.1f%%)", matched, matched / total * 100)
-    logger.info("Needs review:    %4d (%.1f%%)", review, review / total * 100)
-    logger.info("No match:        %4d (%.1f%%)", no_match, no_match / total * 100)
-    logger.info("=" * 60)

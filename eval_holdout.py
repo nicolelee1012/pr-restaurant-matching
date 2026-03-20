@@ -16,10 +16,10 @@ import logging
 import re
 from pathlib import Path
 
-from decision import HIGH_CONFIDENCE, NEEDS_REVIEW, MatchResult, decide, decide_from_llm
+from decision import HIGH_CONFIDENCE, MatchResult, decide, decide_from_llm
 from llm_matcher import llm_match_batch
 from models import RestaurantRow
-from pr_registry import load_restaurants, process_batch
+from pr_registry import process_batch
 from scorer import rank_candidates
 
 logger = logging.getLogger(__name__)
