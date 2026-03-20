@@ -17,6 +17,35 @@ from rapidfuzz import fuzz
 from models import AddrScores, AuxScores, NameScores, ScoredCandidate
 from utils import clean_text, strip_accents  # noqa: F401  (re-exported for callers)
 
+# ---------------------------------------------------------------------------
+# Score weights — calibrated on first 116 labeled rows (37 matches + 79 no-match)
+# All sets of weights within a component sum to 1.0.
+# ---------------------------------------------------------------------------
+
+# Final composite weights
+_W_NAME: float = 0.55   # name similarity dominates
+_W_ADDR: float = 0.30   # address provides a geographic guardrail
+_W_AUX: float = 0.15    # entity status / purpose as tiebreaker
+
+# Address sub-weights
+_W_CITY: float = 0.40
+_W_ZIP: float = 0.35
+_W_STREET: float = 0.25
+
+# Auxiliary sub-weights
+_W_STATUS: float = 0.60
+_W_PURPOSE: float = 0.40
+
+# Score adjustments
+_BONUS_HIGH_NAME: float = 5.0          # added when name_score ≥ threshold
+_THRESH_BONUS_NAME: float = 85.0       # name_score threshold to earn bonus
+_PENALTY_INACTIVE: float = 0.60        # multiplier for non-ACTIVE entities
+_PENALTY_NON_RESTAURANT: float = 0.70  # multiplier when purpose is clearly non-food
+_THRESH_NON_RESTAURANT: float = 10.0   # purpose_score at or below this triggers penalty
+
+# Fuzzy matching thresholds
+_FUZZY_RATIO_THRESHOLD: float = 85.0   # fuzz.ratio score to count as a token match
+
 
 # ---------------------------------------------------------------------------
 # Name scoring
@@ -132,7 +161,7 @@ def score_name(restaurant_name: str, corp_name: str) -> NameScores:
                         if rt.startswith(ct) or ct.startswith(rt):
                             matched_r += 0.8
                             break
-                        if fuzz.ratio(rt, ct) >= 85:
+                        if fuzz.ratio(rt, ct) >= _FUZZY_RATIO_THRESHOLD:
                             matched_r += 0.9
                             break
         distinctive_coverage = matched_r / len(r_tokens)
@@ -141,6 +170,7 @@ def score_name(restaurant_name: str, corp_name: str) -> NameScores:
 
     sequence = fuzz.ratio(r_clean, c_clean)
 
+    # Name sub-weights: token_sort + token_set + partial + wratio + overlap + sequence = 1.0
     combined = (
         0.15 * token_sort
         + 0.15 * token_set
@@ -183,7 +213,7 @@ def score_address(restaurant_row: Mapping[str, Any], entity_detail: Mapping[str,
     r_zip = _normalize_zip(str(restaurant_row.get("Postal code") or ""))
     r_street = clean_text(str(restaurant_row.get("Street") or ""))
 
-    corp_addr: Mapping[str, Any] | dict = entity_detail.get("corpStreetAddress") or {}
+    corp_addr: dict[str, Any] = entity_detail.get("corpStreetAddress") or {}
     if not corp_addr or str(corp_addr.get("city") or "").lower() == "unknown":
         main_loc = entity_detail.get("mainLocation") or {}
         if isinstance(main_loc, dict) and main_loc:
@@ -221,7 +251,7 @@ def score_address(restaurant_row: Mapping[str, Any], entity_detail: Mapping[str,
     else:
         street_score = 0.0
 
-    combined = 0.40 * city_match + 0.35 * zip_match + 0.25 * street_score
+    combined = _W_CITY * city_match + _W_ZIP * zip_match + _W_STREET * street_score
 
     return AddrScores(
         city_match=city_match,
@@ -299,7 +329,7 @@ def score_auxiliary(entity_detail: Mapping[str, Any] | None) -> AuxScores:
         else:
             purpose_score = 50.0
 
-    combined = 0.60 * status_score + 0.40 * purpose_score
+    combined = _W_STATUS * status_score + _W_PURPOSE * purpose_score
 
     return AuxScores(
         status_score=status_score,
@@ -341,16 +371,16 @@ def score_candidate(
     is_active = aux_scores.is_active
     purpose_s = aux_scores.purpose_score
 
-    final_score = 0.55 * name_s + 0.30 * addr_s + 0.15 * aux_s
+    final_score = _W_NAME * name_s + _W_ADDR * addr_s + _W_AUX * aux_s
 
-    if name_s >= 85:
-        final_score += 5.0
+    if name_s >= _THRESH_BONUS_NAME:
+        final_score += _BONUS_HIGH_NAME
 
     if not is_active:
-        final_score *= 0.60
+        final_score *= _PENALTY_INACTIVE
 
-    if purpose_s <= 10:
-        final_score *= 0.70
+    if purpose_s <= _THRESH_NON_RESTAURANT:
+        final_score *= _PENALTY_NON_RESTAURANT
 
     return ScoredCandidate(
         corp_name=corp_name,

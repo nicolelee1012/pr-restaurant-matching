@@ -66,15 +66,23 @@ def _cache_key(restaurant_name: str, candidates: Sequence[ScoredCandidate]) -> s
 def _cache_get(key: str) -> dict[str, Any] | None:
     path = CACHE_DIR / f"{key}.json"
     if path.exists():
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Corrupted LLM cache file — removing: %s", path)
+            path.unlink(missing_ok=True)
+            return None
     return None
 
 
 def _cache_set(key: str, value: Mapping[str, Any]) -> None:
     path = CACHE_DIR / f"{key}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(dict(value), f, ensure_ascii=False)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dict(value), f, ensure_ascii=False)
+    except OSError as exc:
+        logger.warning("Failed to write LLM cache %s: %s", path, exc)
 
 
 def _build_prompt(restaurant: Mapping[str, Any], candidates: Sequence[ScoredCandidate]) -> str:
@@ -175,13 +183,17 @@ async def llm_match(
                     {"role": "user", "content": prompt},
                 ],
             )
+            if not response.choices:
+                raise ValueError("OpenAI returned an empty choices list")
             raw = (response.choices[0].message.content or "").strip()
 
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            result = json.loads(raw.strip())
+            # Robustly extract the JSON object regardless of markdown wrappers.
+            # Find the outermost { ... } and parse only that.
+            json_start = raw.find("{")
+            json_end = raw.rfind("}")
+            if json_start != -1 and json_end > json_start:
+                raw = raw[json_start : json_end + 1]
+            result = json.loads(raw)
 
             match_index = result.get("match_index")
             confidence = result.get("confidence")
@@ -218,9 +230,19 @@ async def llm_match(
 async def llm_match_batch(
     rows_with_candidates: list[tuple[Mapping[str, Any], list[ScoredCandidate]]],
 ) -> list[dict[str, Any]]:
+    """
+    Run LLM matching concurrently for a list of (restaurant, candidates) pairs.
+
+    Creates one shared AsyncOpenAI client for the batch and closes it when done.
+    Returns one result dict per input row — same order as input.
+    Each dict has keys: match_index, confidence, reason, source.
+    """
     client = AsyncOpenAI(api_key=get_openai_api_key())
-    tasks = [
-        llm_match(restaurant, candidates[:20], client)
-        for restaurant, candidates in rows_with_candidates
-    ]
-    return await asyncio.gather(*tasks)
+    try:
+        tasks = [
+            llm_match(restaurant, candidates[:20], client)
+            for restaurant, candidates in rows_with_candidates
+        ]
+        return list(await asyncio.gather(*tasks))
+    finally:
+        await client.close()

@@ -17,13 +17,16 @@ import argparse
 import asyncio
 import csv
 import json
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
 
+from decision import HIGH_CONFIDENCE, NEEDS_REVIEW, NO_MATCH, MatchResult, decide, print_summary
 from pr_registry import load_restaurants, process_batch
 from scorer import rank_candidates
-from decision import decide, print_summary, HIGH_CONFIDENCE, NEEDS_REVIEW, NO_MATCH, MatchResult
+
+logger = logging.getLogger(__name__)
 
 
 OUTPUT_DIR = Path(__file__).parent / "output"
@@ -68,11 +71,8 @@ def write_output_csv(decisions: list[tuple[dict, MatchResult]], output_path: Pat
             if d.status == HIGH_CONFIDENCE:
                 out["Legal Name"] = d.legal_name
                 out["Puerto Rico Link"] = d.pr_link
-            elif d.status == NEEDS_REVIEW:
-                # Keep blank for review rows — don't auto-populate
-                out["Legal Name"] = ""
-                out["Puerto Rico Link"] = ""
             else:
+                # NEEDS_REVIEW and NO_MATCH: leave blank, don't auto-populate
                 out["Legal Name"] = ""
                 out["Puerto Rico Link"] = ""
 
@@ -82,14 +82,14 @@ def write_output_csv(decisions: list[tuple[dict, MatchResult]], output_path: Pat
 
             writer.writerow(out)
 
-    print(f"Wrote {len(decisions)} rows to {output_path}")
+    logger.info("Wrote %s rows to %s", len(decisions), output_path)
 
 
 def write_review_csv(decisions: list[tuple[dict, MatchResult]], output_path: Path):
     """Write a separate CSV for rows that need manual review."""
     review_rows = [(row, d) for row, d in decisions if d.status == NEEDS_REVIEW]
     if not review_rows:
-        print("No review rows to write.")
+        logger.info("No review rows to write.")
         return
 
     fieldnames = [
@@ -120,7 +120,7 @@ def write_review_csv(decisions: list[tuple[dict, MatchResult]], output_path: Pat
 
             writer.writerow(out)
 
-    print(f"Wrote {len(review_rows)} review rows to {output_path}")
+    logger.info("Wrote %s review rows to %s", len(review_rows), output_path)
 
 
 def write_metrics(decisions: list[tuple[dict, MatchResult]], output_path: Path):
@@ -147,10 +147,10 @@ def write_metrics(decisions: list[tuple[dict, MatchResult]], output_path: Path):
         "avg_review_confidence": round(sum(review_scores) / len(review_scores), 1) if review_scores else 0,
     }
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
-    print(f"Wrote metrics to {output_path}")
+    logger.info("Wrote metrics to %s", output_path)
     return metrics
 
 
@@ -189,15 +189,18 @@ async def run_pipeline(restaurants: list[dict], batch_size: int = 50, start: int
         elapsed = time.time() - t0
         matched = sum(1 for _, d in batch_decisions if d.status == HIGH_CONFIDENCE)
         review = sum(1 for _, d in batch_decisions if d.status == NEEDS_REVIEW)
-        no_match_ct = sum(1 for _, d in batch_decisions if d.status == NO_MATCH)
+        no_match_count = sum(1 for _, d in batch_decisions if d.status == NO_MATCH)
 
-        print(f"\nBatch done in {elapsed:.0f}s — match: {matched}, review: {review}, no_match: {no_match_ct}")
+        logger.info(
+            "Batch done in %.0fs — match: %s, review: %s, no_match: %s",
+            elapsed, matched, review, no_match_count,
+        )
 
         # Save intermediate results after each batch (crash recovery)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         intermediate_path = OUTPUT_DIR / f"intermediate_{batch_end}.csv"
         write_output_csv(all_decisions, intermediate_path)
-        print(f"Intermediate save: {intermediate_path}")
+        logger.info("Intermediate save: %s", intermediate_path)
 
     return all_decisions
 
@@ -224,8 +227,8 @@ async def main():
         restaurants = restaurants[start:]
         start = 0  # reset since we sliced
 
-    print(f"Pipeline starting: {len(restaurants)} restaurants to process")
-    print(f"Batch size: {args.batch_size}")
+    logger.info("Pipeline starting: %s restaurants to process", len(restaurants))
+    logger.info("Batch size: %s", args.batch_size)
 
     t0 = time.time()
 
@@ -251,12 +254,17 @@ async def main():
 
     # Print final summary
     print_summary([d for _, d in all_decisions])
-    print(f"\nTotal time: {total_time/60:.1f} minutes")
-    print(f"\nOutputs:")
-    print(f"  Main CSV:   {main_csv}")
-    print(f"  Review CSV: {review_csv}")
-    print(f"  Metrics:    {metrics_path}")
+    logger.info("Total time: %.1f minutes", total_time / 60)
+    logger.info("Outputs:")
+    logger.info("  Main CSV:   %s", main_csv)
+    logger.info("  Review CSV: %s", review_csv)
+    logger.info("  Metrics:    %s", metrics_path)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     asyncio.run(main())

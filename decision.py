@@ -11,10 +11,13 @@ Uses multi-threshold approach calibrated on labeled rows.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Sequence
 
 from models import CandidatePreview, ScoredCandidate
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Thresholds — calibrated from first 116 rows (37 labeled + 79 confirmed no-match)
@@ -203,7 +206,14 @@ def decide(
     return base
 
 
-def classify_batch(results: list[dict]) -> list[MatchResult]:
+def classify_batch(results: list[dict[str, Any]]) -> list[MatchResult]:
+    """
+    Apply ``decide()`` to a list of ``process_batch()`` output dicts.
+
+    Each element of ``results`` must have keys ``"restaurant"`` (the original
+    CSV row dict) and optionally ``"ranked"`` (a list of ``ScoredCandidate``).
+    Returns one ``MatchResult`` per input element, in the same order.
+    """
     decisions: list[MatchResult] = []
     for res in results:
         row = res["restaurant"]
@@ -213,19 +223,20 @@ def classify_batch(results: list[dict]) -> list[MatchResult]:
 
 
 def print_summary(decisions: Sequence[MatchResult]) -> None:
+    """Log a concise summary of match/review/no_match counts to the root logger."""
     total = len(decisions)
     if total == 0:
-        print("No decisions to summarize.")
+        logger.info("No decisions to summarize.")
         return
     matched = sum(1 for d in decisions if d.status == HIGH_CONFIDENCE)
     review = sum(1 for d in decisions if d.status == NEEDS_REVIEW)
     no_match = sum(1 for d in decisions if d.status == NO_MATCH)
 
-    print(f"\n{'='*60}")
-    print("DECISION SUMMARY")
-    print(f"{'='*60}")
-    print(f"Total rows:      {total}")
-    print(f"High confidence: {matched:>4} ({matched/total*100:.1f}%)")
-    print(f"Needs review:    {review:>4} ({review/total*100:.1f}%)")
-    print(f"No match:        {no_match:>4} ({no_match/total*100:.1f}%)")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("DECISION SUMMARY")
+    logger.info("=" * 60)
+    logger.info("Total rows:      %s", total)
+    logger.info("High confidence: %4d (%.1f%%)", matched, matched / total * 100)
+    logger.info("Needs review:    %4d (%.1f%%)", review, review / total * 100)
+    logger.info("No match:        %4d (%.1f%%)", no_match, no_match / total * 100)
+    logger.info("=" * 60)

@@ -26,6 +26,14 @@ secrets.json
 # macOS
 .DS_Store
 
+# Claude Code internal settings (may contain API keys)
+.claude/
+
+# Binary / non-text data files
+*.numbers
+*.xlsx
+*.xls
+
 # IDEs
 .vscode/
 .idea/

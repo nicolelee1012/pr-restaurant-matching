@@ -107,4 +107,5 @@ async def main():
             print(f"{t:>5} {m:>5} {len(matched):>8} {c:>8} {w:>6} {prec:>9.1f}% {cov:>8.1f}%")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

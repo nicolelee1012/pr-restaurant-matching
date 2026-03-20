@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import gzip
 import json
 import hashlib
 import logging
@@ -22,6 +23,13 @@ import ssl
 from base64 import b64decode
 from pathlib import Path
 from typing import Any
+
+try:
+    import brotli as _brotli
+    _HAS_BROTLI = True
+except ImportError:
+    _brotli = None  # type: ignore[assignment]
+    _HAS_BROTLI = False
 
 import certifi
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCPConnector
@@ -61,8 +69,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 CSV_PATH = Path(__file__).parent / "Puerto Rico Data_ v1109.csv"
 
 # Concurrency: maximized for speed
-SEMAPHORE_LIMIT = 20  # 20 parallel Zyte requests
-REQUEST_DELAY = 0.0   # no delay
+SEMAPHORE_LIMIT = 20  # parallel Zyte requests
 
 # ---------------------------------------------------------------------------
 # Name normalization utilities
@@ -166,6 +173,7 @@ def cache_get(prefix: str, query: str) -> list[dict[str, Any]] | dict[str, Any] 
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
+            logger.warning("Corrupted cache file — removing: %s", path)
             path.unlink(missing_ok=True)
             return None
     return None
@@ -185,10 +193,14 @@ async def _parse_zyte_response(resp: ClientResponse) -> dict[str, Any]:
     raw = await resp.read()
     content_encoding = resp.headers.get("Content-Encoding", "")
     if "br" in content_encoding:
-        import brotli
-        raw = brotli.decompress(raw)
+        if not _HAS_BROTLI:
+            logger.warning(
+                "Received brotli-encoded response but 'brotli' package is not installed. "
+                "Install it with: pip install brotli"
+            )
+        else:
+            raw = _brotli.decompress(raw)
     elif "gzip" in content_encoding:
-        import gzip
         raw = gzip.decompress(raw)
     return json.loads(raw)
 
@@ -374,7 +386,7 @@ async def find_candidates(
     # divergences that only share a city/region word like "Hatillo").
     if len(candidates) > 50:
         scored = [
-            (_name_token_overlap(restaurant_name, c["corpName"]), c)
+            (_name_token_overlap(restaurant_name, c.get("corpName", "")), c)
             for c in candidates
         ]
         scored.sort(key=lambda x: -x[0])

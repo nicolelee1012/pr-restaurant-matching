@@ -100,4 +100,5 @@ async def main():
                     print(f"      {cname:45s} final={score} name={nscore:.1f} addr={ascore:.1f}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
