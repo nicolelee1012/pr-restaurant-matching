@@ -35,7 +35,7 @@ import certifi
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCPConnector
 
 from exceptions import ConfigurationError
-from models import BatchResult, Candidate, RestaurantRow
+from models import BatchResult, Candidate, RegistryEntityDetail, RestaurantRow
 from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, strip_accents, strip_noise_phrases
 
 logger = logging.getLogger(__name__)
@@ -475,8 +475,11 @@ async def process_batch(
                 async def fetch_detail(rec: dict[str, Any]) -> Candidate:
                     reg_idx = rec.get("registrationIndex")
                     if reg_idx:
-                        detail = await get_entity_info(session, str(reg_idx), sem, api_key)
-                        return Candidate(search_record=rec, detail=detail)
+                        raw_detail = await get_entity_info(session, str(reg_idx), sem, api_key)
+                        return Candidate(
+                            search_record=rec,
+                            detail=RegistryEntityDetail.from_dict(raw_detail),
+                        )
                     return Candidate(search_record=rec, detail=None)
 
                 candidates = list(await asyncio.gather(*[fetch_detail(rec) for rec in top_recs]))

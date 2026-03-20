@@ -10,11 +10,11 @@ Scores PR registry candidates against restaurant data using:
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping  # Mapping still used for candidate/entity_detail dicts
+from typing import Any
 
 from rapidfuzz import fuzz
 
-from models import AddrScores, AuxScores, Candidate, NameScores, RestaurantRow, ScoredCandidate
+from models import AddrScores, AuxScores, Candidate, NameScores, RegistryEntityDetail, RestaurantRow, ScoredCandidate
 from utils import (  # noqa: F401  (re-exported for callers)
     CORP_SUFFIXES,
     clean_text,
@@ -167,7 +167,7 @@ def _normalize_zip(z: str) -> str:
     return z_str[:5]
 
 
-def score_address(restaurant_row: RestaurantRow, entity_detail: Mapping[str, Any] | None) -> AddrScores:
+def score_address(restaurant_row: RestaurantRow, entity_detail: RegistryEntityDetail | None) -> AddrScores:
     if not entity_detail:
         return AddrScores(0, 0, 0, 0)
 
@@ -175,17 +175,10 @@ def score_address(restaurant_row: RestaurantRow, entity_detail: Mapping[str, Any
     r_zip = _normalize_zip(restaurant_row.postal_code)
     r_street = clean_text(restaurant_row.street)  # intentionally blank when no street column
 
-    corp_addr: dict[str, Any] = entity_detail.get("corpStreetAddress") or {}
-    if not corp_addr or str(corp_addr.get("city") or "").lower() == "unknown":
-        main_loc = entity_detail.get("mainLocation") or {}
-        if isinstance(main_loc, dict) and main_loc:
-            sa = main_loc.get("streetAddress")
-            if isinstance(sa, dict):
-                corp_addr = sa
-
-    e_city = clean_text(str(corp_addr.get("city") or ""))
-    e_zip = _normalize_zip(str(corp_addr.get("zip") or ""))
-    e_street = clean_text(str(corp_addr.get("address1") or ""))
+    # Address field names and fallback logic centralised in RegistryEntityDetail
+    e_city = clean_text(entity_detail.city)
+    e_zip = _normalize_zip(entity_detail.zip)
+    e_street = clean_text(entity_detail.street)
 
     if r_city and e_city:
         city_sim = fuzz.ratio(r_city, e_city)
@@ -258,12 +251,12 @@ NON_RESTAURANT_PURPOSE_KEYWORDS = {
 }
 
 
-def score_auxiliary(entity_detail: Mapping[str, Any] | None) -> AuxScores:
+def score_auxiliary(entity_detail: RegistryEntityDetail | None) -> AuxScores:
     if not entity_detail:
         return AuxScores(0, 0, False, 0)
 
-    corp = entity_detail.get("corporation") or {}
-    status = str(corp.get("statusEn") or "").upper()
+    # Status and purpose field names centralised in RegistryEntityDetail
+    status = entity_detail.status
 
     status_scores = {
         "ACTIVE": 100,
@@ -275,10 +268,10 @@ def score_auxiliary(entity_detail: Mapping[str, Any] | None) -> AuxScores:
     status_score = float(status_scores.get(status, 0))
     is_active = status == "ACTIVE"
 
-    purpose = clean_text(str(corp.get("purpose") or ""))
+    purpose = clean_text(entity_detail.purpose)
     purpose_score = 50.0
 
-    if purpose and purpose not in ("unknown", "n a", ""):
+    if purpose:
         pl = purpose.lower()
         has_r = any(kw in pl for kw in RESTAURANT_PURPOSE_KEYWORDS)
         has_nr = any(kw in pl for kw in NON_RESTAURANT_PURPOSE_KEYWORDS)

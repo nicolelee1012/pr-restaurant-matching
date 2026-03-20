@@ -84,6 +84,81 @@ class RestaurantRow:
 
 
 @dataclass
+class RegistryEntityDetail:
+    """
+    Typed wrapper for the PR Registry ``/api/corporation/info`` payload.
+
+    **Single source of truth for entity detail API field names.**
+    All string keys (``"corpStreetAddress"``, ``"statusEn"``, ``"purpose"``, …)
+    are accessed only through the typed properties below.  If the upstream API
+    renames or restructures a field, update the property here — scorer, LLM
+    matcher, and any other consumer automatically see the fix.
+    """
+
+    _raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any] | None) -> RegistryEntityDetail:
+        """Wrap a raw API dict; accepts None gracefully (returns empty wrapper)."""
+        return cls(_raw=d or {})
+
+    # ── Address ───────────────────────────────────────────────────────────────
+    def _best_address(self) -> dict[str, Any]:
+        """
+        Return the most useful address dict from the payload.
+
+        Preference: ``corpStreetAddress`` when its city is not "unknown",
+        otherwise fall back to ``mainLocation.streetAddress``.
+        If the upstream API restructures the address hierarchy, update here only.
+        """
+        corp_addr: dict[str, Any] = self._raw.get("corpStreetAddress") or {}
+        if corp_addr and str(corp_addr.get("city") or "").lower() != "unknown":
+            return corp_addr
+        main_loc = self._raw.get("mainLocation") or {}
+        if isinstance(main_loc, dict) and main_loc:
+            sa = main_loc.get("streetAddress")
+            if isinstance(sa, dict):
+                return sa
+        return corp_addr
+
+    @property
+    def city(self) -> str:
+        return str(self._best_address().get("city") or "")
+
+    @property
+    def zip(self) -> str:
+        return str(self._best_address().get("zip") or "")
+
+    @property
+    def street(self) -> str:
+        return str(self._best_address().get("address1") or "")
+
+    @property
+    def addr_str(self) -> str:
+        """Formatted address string for display / prompts."""
+        parts = [self.street, self.city, self.zip]
+        return ", ".join(p for p in parts if p)
+
+    # ── Entity status / purpose ───────────────────────────────────────────────
+    @property
+    def status(self) -> str:
+        """Entity status in upper-case (e.g. ``"ACTIVE"``, ``"DISSOLVED"``)."""
+        corp = self._raw.get("corporation") or {}
+        return str(corp.get("statusEn") or "").upper()
+
+    @property
+    def purpose(self) -> str:
+        """Stated corporate purpose string, empty when absent / unknown."""
+        corp = self._raw.get("corporation") or {}
+        p = corp.get("purpose") or ""
+        return "" if str(p).lower() in ("unknown", "n/a", "n a") else str(p)
+
+    def __bool__(self) -> bool:
+        """Allow ``if entity_detail:`` to behave as ``if raw_dict:``."""
+        return bool(self._raw)
+
+
+@dataclass
 class Candidate:
     """
     One registry search result paired with its fetched detail payload.
@@ -93,8 +168,8 @@ class Candidate:
     renames a field, update the property — nothing else needs to change.
     """
 
-    search_record: dict[str, Any]   # raw /search API record
-    detail: dict[str, Any] | None = None  # raw /info API payload, if fetched
+    search_record: dict[str, Any]          # raw /search API record
+    detail: RegistryEntityDetail | None = None  # typed /info payload, if fetched
 
     # ── Typed accessors for registry search-record fields ───────────────────
     @property
@@ -206,7 +281,7 @@ class ScoredCandidate:
     name_scores: NameScores
     addr_scores: AddrScores
     aux_scores: AuxScores
-    detail: dict[str, Any] | None = None
+    detail: RegistryEntityDetail | None = None
 
     def summary_dict(self) -> dict[str, Any]:
         """Compact dict for review CSV / logging."""

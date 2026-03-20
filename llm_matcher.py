@@ -116,27 +116,11 @@ def _build_prompt(restaurant: RestaurantRow, candidates: Sequence[ScoredCandidat
     ]
 
     for i, c in enumerate(candidates):
-        corp_name = c.corp_name
-        status = c.status
-        addr_parts: list[str] = []
-        detail = c.detail or {}
-        corp_addr = detail.get("corpStreetAddress") or {}
-        if isinstance(corp_addr, dict) and corp_addr:
-            addr_parts = [
-                str(corp_addr.get("address1") or ""),
-                str(corp_addr.get("city") or ""),
-                str(corp_addr.get("zip") or ""),
-            ]
-        addr_str = ", ".join(filter(None, addr_parts)) or "address unknown"
-
-        purpose = ""
-        corp_info = detail.get("corporation") or {}
-        if isinstance(corp_info, dict):
-            p = corp_info.get("purpose")
-            if p and str(p).lower() not in ("unknown", "n/a", ""):
-                purpose = f' | purpose: "{p}"'
-
-        lines.append(f"  [{i}] {corp_name} | {status} | {addr_str}{purpose}")
+        # All API field names resolved through typed RegistryEntityDetail properties
+        detail = c.detail
+        addr_str = (detail.addr_str if detail else "") or "address unknown"
+        purpose = f' | purpose: "{detail.purpose}"' if detail and detail.purpose else ""
+        lines.append(f"  [{i}] {c.corp_name} | {c.status} | {addr_str}{purpose}")
 
     lines += [
         "",
