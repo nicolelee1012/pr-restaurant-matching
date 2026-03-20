@@ -1,0 +1,7 @@
+# PR restaurant ↔ legal entity pipeline
+aiohttp>=3.9.0,<4
+certifi>=2024.0.0
+rapidfuzz>=3.6.0
+openai>=1.30.0
+# Optional: Zyte may return brotli-compressed JSON bodies
+brotli>=1.1.0
