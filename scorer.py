@@ -15,7 +15,14 @@ from typing import Any, Mapping  # Mapping still used for candidate/entity_detai
 from rapidfuzz import fuzz
 
 from models import AddrScores, AuxScores, Candidate, NameScores, RestaurantRow, ScoredCandidate
-from utils import clean_text, strip_accents  # noqa: F401  (re-exported for callers)
+from utils import (  # noqa: F401  (re-exported for callers)
+    CORP_SUFFIXES,
+    clean_text,
+    strip_accents,
+    strip_corp_suffixes,
+    strip_noise_phrases,
+    strip_noise_words,
+)
 
 # ---------------------------------------------------------------------------
 # Score weights — calibrated on first 116 labeled rows (37 matches + 79 no-match)
@@ -50,54 +57,9 @@ _FUZZY_RATIO_THRESHOLD: float = 85.0   # fuzz.ratio score to count as a token ma
 # ---------------------------------------------------------------------------
 # Name scoring
 # ---------------------------------------------------------------------------
-RESTAURANT_NOISE = {
-    # Generic establishment-type words — single tokens only (multi-word strings
-    # are never matched by the word-by-word iteration in _strip_restaurant_noise,
-    # so only list individual words here).
-    "restaurant", "restaurante",
-    "bar", "grill", "steakhouse", "steak",
-    "bakery", "panaderia", "cafeteria", "cafe",
-    "sushi", "burger", "kitchen",
-    "pizza", "pizzeria", "bbq",
-    "seafood", "lounge", "tavern", "pub",
-    "diner", "bistro", "trattoria",
-    "cantina", "taqueria", "cocina",
-    "shop", "place", "house",
-    "sport", "sports", "food", "truck",
-}
-
-CORP_SUFFIXES = {
-    "inc",
-    "inc.",
-    "corp",
-    "corp.",
-    "llc",
-    "llp",
-    "incorporated",
-    "corporation",
-    "company",
-    "co",
-    "co.",
-    "incorporado",
-    "incorporada",
-    "sociedad",
-    "enterprises",
-    "enterprise",
-    "group",
-    "holdings",
-}
-
-
-def _strip_restaurant_noise(name: str) -> str:
-    words = clean_text(name).split()
-    filtered = [w for w in words if w not in RESTAURANT_NOISE]
-    return " ".join(filtered) if filtered else clean_text(name)
-
-
-def _strip_corp_suffixes(name: str) -> str:
-    words = clean_text(name).split()
-    filtered = [w for w in words if w not in CORP_SUFFIXES]
-    return " ".join(filtered) if filtered else clean_text(name)
+# RESTAURANT_NOISE, CORP_SUFFIXES, and the strip functions all live in utils.py
+# (the single source of truth). They are imported above and re-exported so
+# external callers that import them from scorer continue to work.
 
 
 def _strip_location_suffix(name: str) -> str:
@@ -109,9 +71,9 @@ def score_name(restaurant_name: str, corp_name: str) -> NameScores:
     Score name similarity between restaurant DBA name and corporate legal name.
     """
     r_raw = clean_text(_strip_location_suffix(restaurant_name))
-    r_clean = _strip_restaurant_noise(_strip_location_suffix(restaurant_name))
+    r_clean = strip_noise_words(_strip_location_suffix(restaurant_name))
     c_raw = clean_text(corp_name)
-    c_clean = _strip_corp_suffixes(corp_name)
+    c_clean = strip_corp_suffixes(corp_name)
 
     token_sort = max(
         fuzz.token_sort_ratio(r_raw, c_raw),
@@ -211,7 +173,7 @@ def score_address(restaurant_row: RestaurantRow, entity_detail: Mapping[str, Any
 
     r_city = clean_text(restaurant_row.city)
     r_zip = _normalize_zip(restaurant_row.postal_code)
-    r_street = clean_text(restaurant_row.street or restaurant_row.full_address)
+    r_street = clean_text(restaurant_row.street)  # intentionally blank when no street column
 
     corp_addr: dict[str, Any] = entity_detail.get("corpStreetAddress") or {}
     if not corp_addr or str(corp_addr.get("city") or "").lower() == "unknown":

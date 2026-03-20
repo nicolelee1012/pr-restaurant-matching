@@ -36,7 +36,7 @@ from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCP
 
 from exceptions import ConfigurationError
 from models import BatchResult, Candidate, RestaurantRow
-from utils import strip_accents
+from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, strip_accents, strip_noise_phrases
 
 logger = logging.getLogger(__name__)
 
@@ -76,25 +76,21 @@ SEMAPHORE_LIMIT = 20  # parallel Zyte requests
 # Name normalization utilities
 # ---------------------------------------------------------------------------
 def normalize_name(name: str) -> str:
-    """Normalize a restaurant name for search purposes."""
-    name = strip_accents(name.lower().strip())
-    # Remove common suffixes that won't appear in legal names
-    noise_words = [
-        "restaurant", "restaurante", "bar & grill", "bar and grill",
-        "bar & restaurant", "sports bar", "sport bar",
-        "steakhouse", "steak house", "pizza", "bakery", "panaderia",
-        "cafeteria", "cafe", "café", "sushi bar", "food truck",
-        "ice cream", "burger", "grill",
-    ]
-    result = name
-    for w in noise_words:
-        result = result.replace(w, " ")
-    # Remove location qualifiers after dash  e.g. "Ikebana Sushi Bar - Guaynabo"
-    result = re.split(r"\s*[-–—]\s*", result)[0]
-    # Clean punctuation except apostrophes
+    """
+    Normalize a restaurant name for registry search queries.
+
+    Noise phrases are stripped via ``strip_noise_phrases()`` from utils —
+    the single canonical list shared with the scorer.  Multi-word phrases
+    ("bar & grill", "sports bar") are handled correctly because we use
+    str.replace() rather than word-by-word iteration.
+    """
+    # Strip location suffix first ("Ikebana Sushi Bar - Guaynabo" → "Ikebana Sushi Bar")
+    name = re.sub(r"\s*[-–—]\s*.*$", "", name).strip()
+    # Apply shared noise-phrase removal + accent stripping
+    result = strip_noise_phrases(name)
+    # Allow apostrophes through (n', 's) but remove everything else non-alphanumeric
     result = re.sub(r"[^a-z0-9' ]", " ", result)
-    result = re.sub(r"\s+", " ", result).strip()
-    return result
+    return re.sub(r"\s+", " ", result).strip()
 
 
 def generate_search_variants(name: str) -> list[str]:
@@ -121,14 +117,11 @@ def generate_search_variants(name: str) -> list[str]:
     # Single first word (core brand) - important for cases like "Condal"
     # Only use single-word search if the name is multi-word (otherwise we already have it)
     # and the word is distinctive enough (>= 4 chars)
-    too_common = {
-        "the", "los", "las", "del", "san", "new", "old", "big",
-        "east", "west", "north", "south", "casa", "don", "el", "la",
-    }
-    if words and len(words[0]) >= 4 and words[0] not in too_common:
+    # TOO_COMMON_WORDS is defined in utils — update it there if needed
+    if words and len(words[0]) >= 4 and words[0] not in TOO_COMMON_WORDS:
         variants.add(words[0])
     # If first word is too common, try the second word as brand
-    if words and words[0] in too_common and len(words) >= 2 and len(words[1]) >= 4:
+    if words and words[0] in TOO_COMMON_WORDS and len(words) >= 2 and len(words[1]) >= 4:
         variants.add(words[1])
 
     # Remove 's, 'n type contractions
@@ -330,11 +323,10 @@ def _name_token_overlap(restaurant_name: str, corp_name: str) -> float:
     """Quick token overlap score between restaurant name and corp name."""
     r_tokens = set(normalize_name(restaurant_name).split())
     c_tokens = set(strip_accents(corp_name.lower()).split())
-    # Remove very common corporate suffixes
-    c_tokens -= {"inc", "inc.", "corp", "corp.", "llc", "llp", "incorporado",
-                 "incorporated", "corporation", "company", "co", "co.",
-                 "de", "del", "the", "el", "la", "los", "las"}
-    r_tokens -= {"the", "el", "la", "los", "las", "de", "del"}
+    # Remove corporate suffixes and common stopwords (single source of truth: utils.py)
+    stopwords = {"de", "del"} | TOO_COMMON_WORDS
+    c_tokens -= CORP_SUFFIXES | stopwords
+    r_tokens -= stopwords
     if not r_tokens or not c_tokens:
         return 0.0
     # Exact overlap
@@ -507,9 +499,9 @@ async def main():
     restaurants = load_restaurants()
 
     # Filter to rows without Legal Name (the ones we need to find)
-    unlabeled = [r for r in restaurants if not r.get("Legal Name", "").strip()]
+    unlabeled = [r for r in restaurants if not r.legal_name]
     # Also get labeled ones for testing
-    labeled = [r for r in restaurants if r.get("Legal Name", "").strip()]
+    labeled = [r for r in restaurants if r.legal_name]
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logger.info("Total restaurants: %s", len(restaurants))
@@ -527,36 +519,25 @@ async def main():
     missed_list = []
 
     for res in results:
-        name = res["restaurant"]["Name"]
-        expected_legal = res["restaurant"]["Legal Name"].strip().upper()
-        pr_link = res["restaurant"].get("Puerto Rico Link", "")
-        # Extract registration index from PR link
-        expected_index = ""
-        if "?c=" in pr_link:
-            expected_index = pr_link.split("?c=")[-1]
+        row = res.restaurant
+        name = row.name
+        expected_legal = row.legal_name.upper()
+        expected_index = row.pr_link.split("?c=")[-1] if "?c=" in row.pr_link else ""
 
-        candidate_names = [
-            c["search_record"]["corpName"].upper()
-            for c in res["candidates"]
-        ]
-        candidate_indices = [
-            c["search_record"].get("registrationIndex", "")
-            for c in res["candidates"]
-        ]
+        candidate_names = [c.corp_name.upper() for c in res.candidates]
+        candidate_indices = [c.registration_index for c in res.candidates]
 
         # Check if expected entity is in candidates (by index or name)
-        matched = False
-        if expected_index and expected_index in candidate_indices:
-            matched = True
-        elif expected_legal in candidate_names:
-            matched = True
+        matched = (expected_index and expected_index in candidate_indices) or (
+            expected_legal in candidate_names
+        )
 
         if matched:
             found += 1
             found_list.append(name)
         else:
             not_found += 1
-            missed_list.append((name, expected_legal, expected_index, len(res["candidates"])))
+            missed_list.append((name, expected_legal, expected_index, len(res.candidates)))
 
     logger.info("\n" + "=" * 60)
     logger.info("RESULTS: %s/%s correct entities found in candidates", found, found + not_found)

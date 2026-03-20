@@ -202,18 +202,29 @@ def decide(
     return base
 
 
-def classify_batch(results: list[dict[str, Any]]) -> list[MatchResult]:
+def classify_batch(
+    results: list[Any],
+    ranked_map: dict[str, list[ScoredCandidate]] | None = None,
+) -> list[MatchResult]:
     """
-    Apply ``decide()`` to a list of ``process_batch()`` output dicts.
+    Apply ``decide()`` to a list of ``BatchResult`` objects.
 
-    Each element of ``results`` must have keys ``"restaurant"`` (the original
-    CSV row dict) and optionally ``"ranked"`` (a list of ``ScoredCandidate``).
+    ``ranked_map`` optionally supplies pre-scored candidates keyed by
+    restaurant name (used when scoring has already been run outside this
+    function).  When absent, each restaurant is decided with no candidates.
+
     Returns one ``MatchResult`` per input element, in the same order.
     """
+    from models import BatchResult  # local import avoids circular risk
+
     decisions: list[MatchResult] = []
     for res in results:
-        row = res["restaurant"]
-        ranked = res.get("ranked", [])
+        if isinstance(res, BatchResult):
+            row = res.restaurant
+        else:
+            # Fallback: legacy dict-based caller (deprecated)
+            row = res.get("restaurant")
+        ranked = (ranked_map or {}).get(row.name, [])
         decisions.append(decide(row, ranked))
     return decisions
 

@@ -216,7 +216,7 @@ async def main():
 
     if not args.all:
         # Only process unlabeled rows (skip the 50 already done by hand)
-        restaurants = [r for r in restaurants if not r.get("Legal Name", "").strip()]
+        restaurants = [r for r in restaurants if not r.legal_name]
 
     if args.limit:
         restaurants = restaurants[args.start:args.start + args.limit]

@@ -9,7 +9,7 @@ from scorer import rank_candidates
 
 async def main():
     restaurants = load_restaurants()
-    labeled = [r for r in restaurants if r.get("Legal Name", "").strip()]
+    labeled = [r for r in restaurants if r.legal_name]
 
     print(f"Processing {len(labeled)} labeled rows (all cached)...\n")
     results = await process_batch(labeled, fetch_details=True)
