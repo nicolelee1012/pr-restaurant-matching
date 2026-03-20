@@ -36,7 +36,7 @@ from aiohttp import BasicAuth, ClientSession, ClientTimeout, ClientResponse, TCP
 
 from exceptions import ConfigurationError
 from models import BatchResult, Candidate, RegistryEntityDetail, RestaurantRow
-from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, strip_accents, strip_corp_suffixes, strip_noise_phrases, strip_noise_words
+from utils import CORP_SUFFIXES, TOO_COMMON_WORDS, clean_text, strip_accents, strip_corp_suffixes, strip_noise_phrases, strip_noise_words
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +327,10 @@ def _name_token_overlap(restaurant_name: str, corp_name: str) -> float:
     r_clean = strip_corp_suffixes(strip_noise_words(restaurant_name))
     r_tokens = set(r_clean.split()) if r_clean else set(strip_accents(restaurant_name.lower()).split())
 
-    c_tokens = set(strip_accents(corp_name.lower()).split())
+    # Use clean_text (not just strip_accents) so apostrophes are stripped
+    # consistently: r_tokens has "martins" (clean_text removes apostrophe),
+    # c_tokens must also have "martins" — otherwise "MARTIN'S" ≠ "martins" → overlap=0.
+    c_tokens = set(clean_text(corp_name).split())
     # Only remove grammatical articles from tokens — NOT directional words like
     # "west"/"north"/"south" which distinguish brands ("West Marine" ≠ "South Marine").
     _ARTICLES: frozenset[str] = frozenset({"the", "el", "la", "los", "las", "de", "del"})
